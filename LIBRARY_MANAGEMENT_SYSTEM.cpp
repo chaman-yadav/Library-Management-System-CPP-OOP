@@ -3,7 +3,6 @@
                     LIBRARY MANAGEMENT SYSTEM
 ================================================================================
 Author: Chaman Yadav
-Date: 2025
 Description: Complete Library Management System using OOP concepts in C++
              with binary file storage (.dat files)
 
@@ -1134,39 +1133,3 @@ int main() {
     
     return 0;
 }
-
-/*
-================================================================================
-                            COMPILATION & USAGE
-================================================================================
-
-COMPILATION:
------------
-Windows: g++ -std=c++11 library_management_system.cpp -o library_system.exe
-Linux/Mac: g++ -std=c++11 library_management_system.cpp -o library_system
-
-USAGE:
-------
-Windows: library_system.exe
-Linux/Mac: ./library_system
-
-FILES CREATED:
---------------
-- books.dat: Binary file storing all book data
-- users.dat: Binary file storing all user data
-
-These files are created automatically when you first run the program.
-Data persists between program runs.
-
-SAMPLE WORKFLOW:
----------------
-1. Run the program
-2. Add some books (option 1)
-3. Register some users (option 5)  
-4. Issue books to users (option 8)
-5. Return books (option 9)
-6. View statistics (option 11)
-
-The system handles all edge cases and provides comprehensive error checking.
-================================================================================
-*/
