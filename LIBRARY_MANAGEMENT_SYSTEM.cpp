@@ -1,116 +1,93 @@
-/*
-================================================================================
-                    LIBRARY MANAGEMENT SYSTEM
-================================================================================
-Author: Chaman Yadav
-Description: Complete Library Management System using OOP concepts in C++
-             with binary file storage (.dat files)
+// ================================================================================
+// LIBRARY MANAGEMENT SYSTEM 
+// ================================================================================
+// Author: Chaman Yadav
+// Description: Complete Library Management System with all features from the
+//              original file-based version, now fully integrated with a
+//              MySQL database backend.
+// ================================================================================
 
-Features:
-- Book Management (Add, Remove, Search, Display)
-- User Management (Register, Remove, Display)  
-- Issue/Return Books with Date Tracking
-- Fine Calculation (Rs. 2/day after 14 days)
-- Binary File Storage (books.dat, users.dat)
-- Complete Error Handling and Validation
-
-OOP Concepts Used:
-- Encapsulation: Private data with controlled access
-- Inheritance: DigitalBook inherits from Book
-- Polymorphism: Virtual functions
-- Abstraction: Clean interfaces
-- Composition: Library contains Books and Users
-
-Files Created Automatically:
-- books.dat (stores all book data)
-- users.dat (stores all user data)
-
-================================================================================
-*/
-
+// C++ Standard Libraries
 #include <iostream>
-#include <fstream>
-#include <vector>
 #include <string>
-#include <algorithm>
-#include <cstring>
+#include <vector>
+#include <memory>
 #include <ctime>
 #include <iomanip>
 #include <limits>
+#include <algorithm>
+#include <sstream>
 
-using namespace std;
+// MySQL Connector/C++ (X DevAPI)
+#include <mysqlx/xdevapi.h>
+
+// Use only the non-conflicting std names
+using std::cout;
+using std::cin;
+using std::endl;
+using std::vector;
+using std::getline;
+using std::unique_ptr;
+using std::make_unique;
+using std::numeric_limits;
+using std::streamsize;
+using std::string; // Explicitly use std::string to avoid conflicts
 
 // ============================================================================
-//                              BOOK CLASS
+// HELPER FUNCTIONS & DATA CLASSES
 // ============================================================================
+
+// Helper function to get the current date in YYYY-MM-DD format for SQL
+string getCurrentDateForSQL() {
+    time_t now = time(0);
+    tm ltm;
+#ifdef _WIN32
+    localtime_s(&ltm, &now); // Use localtime_s for safety on Windows
+#else
+    localtime_r(&now, &ltm); // Use localtime_r for safety on POSIX systems
+#endif
+    char buffer[11];
+    strftime(buffer, sizeof(buffer), "%Y-%m-%d", &ltm);
+    return string(buffer);
+}
+
+// Helper to calculate days between two "YYYY-MM-DD" dates
+int calculateDays(const string& date1_str, const string& date2_str) {
+    struct tm tm1 = {}, tm2 = {};
+    std::stringstream ss1(date1_str);
+    std::stringstream ss2(date2_str);
+
+    ss1 >> std::get_time(&tm1, "%Y-%m-%d");
+    ss2 >> std::get_time(&tm2, "%Y-%m-%d");
+
+    time_t time1 = mktime(&tm1);
+    time_t time2 = mktime(&tm2);
+
+    if (time1 == -1 || time2 == -1) {
+        return 0; // Invalid date format
+    }
+
+    return (int)difftime(time2, time1) / (24 * 3600);
+}
+
 
 class Book {
-private:
-    char bookID[20];        // Unique book identifier
-    char title[100];        // Book title
-    char author[50];        // Book author
-    int totalCopies;        // Total number of copies
-    int availableCopies;    // Available copies for borrowing
-    bool isActive;          // Book status (active/inactive)
-
 public:
-    // Default Constructor
-    Book() {
-        strcpy(bookID, "");
-        strcpy(title, "");
-        strcpy(author, "");
-        totalCopies = 0;
-        availableCopies = 0;
-        isActive = true;
-    }
-    
-    // Parameterized Constructor
-    Book(const string& id, const string& bookTitle, const string& bookAuthor, int copies) {
-        // Safe string copying to prevent buffer overflow
-        strncpy(bookID, id.c_str(), sizeof(bookID) - 1);
-        bookID[sizeof(bookID) - 1] = '\0';
-        
-        strncpy(title, bookTitle.c_str(), sizeof(title) - 1);
-        title[sizeof(title) - 1] = '\0';
-        
-        strncpy(author, bookAuthor.c_str(), sizeof(author) - 1);
-        author[sizeof(author) - 1] = '\0';
-        
-        totalCopies = copies;
-        availableCopies = copies;
-        isActive = true;
-    }
-    
-    // Getter Methods (Encapsulation)
-    string getBookID() const { return string(bookID); }
-    string getTitle() const { return string(title); }
-    string getAuthor() const { return string(author); }
-    int getTotalCopies() const { return totalCopies; }
-    int getAvailableCopies() const { return availableCopies; }
-    bool getIsActive() const { return isActive; }
-    
-    // Setter Methods (Encapsulation)
-    void setBookID(const string& id) {
-        strncpy(bookID, id.c_str(), sizeof(bookID) - 1);
-        bookID[sizeof(bookID) - 1] = '\0';
-    }
-    
-    void setTitle(const string& bookTitle) {
-        strncpy(title, bookTitle.c_str(), sizeof(title) - 1);
-        title[sizeof(title) - 1] = '\0';
-    }
-    
-    void setAuthor(const string& bookAuthor) {
-        strncpy(author, bookAuthor.c_str(), sizeof(author) - 1);
-        author[sizeof(author) - 1] = '\0';
-    }
-    
-    void setTotalCopies(int copies) { totalCopies = copies; }
-    void setAvailableCopies(int copies) { availableCopies = copies; }
-    void setIsActive(bool active) { isActive = active; }
-    
-    // Display book details with formatting
-    virtual void displayDetails() const {
+    string bookID;
+    string title;
+    string author;
+    int totalCopies;
+    int availableCopies;
+    bool isActive;
+    string downloadLink;
+    int downloadLimit;
+
+    Book() = default;
+
+    Book(string id, string t, string a, int total, int available, bool active = true, string link = "", int limit = 0)
+        : bookID(id), title(t), author(a), totalCopies(total), availableCopies(available), isActive(active), downloadLink(link), downloadLimit(limit) {}
+
+    void displayDetails() const {
         cout << "\n" << string(50, '=') << endl;
         cout << "Book ID: " << bookID << endl;
         cout << "Title: " << title << endl;
@@ -118,813 +95,391 @@ public:
         cout << "Total Copies: " << totalCopies << endl;
         cout << "Available Copies: " << availableCopies << endl;
         cout << "Status: " << (isActive ? "Active" : "Inactive") << endl;
-        cout << string(50, '=') << endl;
-    }
-    
-    // Check if book is available for borrowing
-    bool isAvailable() const {
-        return isActive && availableCopies > 0;
-    }
-    
-    // Borrow a book (decrease available copies)
-    bool borrowBook() {
-        if (isAvailable()) {
-            availableCopies--;
-            return true;
+        if (!downloadLink.empty()) {
+            cout << "Download Link: " << downloadLink << endl;
+            cout << "Download Limit: " << downloadLimit << endl;
         }
-        return false;
-    }
-    
-    // Return a book (increase available copies)
-    bool returnBook() {
-        if (availableCopies < totalCopies) {
-            availableCopies++;
-            return true;
-        }
-        return false;
-    }
-    
-    // Operator overloading for comparison
-    bool operator==(const string& id) const {
-        return string(bookID) == id;
-    }
-};
-
-// ============================================================================
-//                          DIGITAL BOOK CLASS (INHERITANCE)
-// ============================================================================
-
-class DigitalBook : public Book {
-private:
-    char downloadLink[200];  // Download URL for digital book
-    int downloadLimit;       // Maximum download attempts
-    
-public:
-    // Default Constructor
-    DigitalBook() : Book() {
-        strcpy(downloadLink, "");
-        downloadLimit = 0;
-    }
-    
-    // Parameterized Constructor
-    DigitalBook(const string& id, const string& title, const string& author, 
-                int copies, const string& link, int limit) 
-        : Book(id, title, author, copies) {
-        strncpy(downloadLink, link.c_str(), sizeof(downloadLink) - 1);
-        downloadLink[sizeof(downloadLink) - 1] = '\0';
-        downloadLimit = limit;
-    }
-    
-    // Setter and Getter for digital book specific attributes
-    void setDownloadLink(const string& link) {
-        strncpy(downloadLink, link.c_str(), sizeof(downloadLink) - 1);
-        downloadLink[sizeof(downloadLink) - 1] = '\0';
-    }
-    
-    void setDownloadLimit(int limit) { downloadLimit = limit; }
-    string getDownloadLink() const { return string(downloadLink); }
-    int getDownloadLimit() const { return downloadLimit; }
-    
-    // Polymorphism: Override displayDetails method
-    void displayDetails() const override {
-        Book::displayDetails();  // Call parent class method
-        cout << "Download Link: " << downloadLink << endl;
-        cout << "Download Limit: " << downloadLimit << endl;
         cout << string(50, '=') << endl;
     }
 };
-
-// ============================================================================
-//                          BORROW RECORD STRUCTURE
-// ============================================================================
-
-struct BorrowRecord {
-    char bookID[20];        // ID of borrowed book
-    char borrowDate[12];    // Borrow date (DD/MM/YYYY)
-    char returnDate[12];    // Return date (DD/MM/YYYY)
-    bool isReturned;        // Return status
-    
-    // Default Constructor
-    BorrowRecord() {
-        strcpy(bookID, "");
-        strcpy(borrowDate, "");
-        strcpy(returnDate, "");
-        isReturned = false;
-    }
-    
-    // Parameterized Constructor
-    BorrowRecord(const string& id, const string& bDate) {
-        strncpy(bookID, id.c_str(), sizeof(bookID) - 1);
-        bookID[sizeof(bookID) - 1] = '\0';
-        
-        strncpy(borrowDate, bDate.c_str(), sizeof(borrowDate) - 1);
-        borrowDate[sizeof(borrowDate) - 1] = '\0';
-        
-        strcpy(returnDate, "");
-        isReturned = false;
-    }
-};
-
-// ============================================================================
-//                              USER CLASS
-// ============================================================================
 
 class User {
-private:
-    char userID[20];                    // Unique user identifier
-    char name[50];                      // User's full name
-    char email[50];                     // User's email address
-    char phone[15];                     // User's phone number
-    BorrowRecord borrowedBooks[10];     // Array of borrowed books (max 10)
-    int borrowCount;                    // Current number of borrowed books
-    bool isActive;                      // User status (active/inactive)
-    
 public:
-    // Default Constructor
-    User() {
-        strcpy(userID, "");
-        strcpy(name, "");
-        strcpy(email, "");
-        strcpy(phone, "");
-        borrowCount = 0;
-        isActive = true;
-    }
-    
-    // Parameterized Constructor
-    User(const string& id, const string& userName, const string& userEmail, const string& userPhone) {
-        strncpy(userID, id.c_str(), sizeof(userID) - 1);
-        userID[sizeof(userID) - 1] = '\0';
-        
-        strncpy(name, userName.c_str(), sizeof(name) - 1);
-        name[sizeof(name) - 1] = '\0';
-        
-        strncpy(email, userEmail.c_str(), sizeof(email) - 1);
-        email[sizeof(email) - 1] = '\0';
-        
-        strncpy(phone, userPhone.c_str(), sizeof(phone) - 1);
-        phone[sizeof(phone) - 1] = '\0';
-        
-        borrowCount = 0;
-        isActive = true;
-    }
-    
-    // Getter Methods (Encapsulation)
-    string getUserID() const { return string(userID); }
-    string getName() const { return string(name); }
-    string getEmail() const { return string(email); }
-    string getPhone() const { return string(phone); }
-    int getBorrowCount() const { return borrowCount; }
-    bool getIsActive() const { return isActive; }
-    
-    // Setter Methods (Encapsulation)
-    void setUserID(const string& id) {
-        strncpy(userID, id.c_str(), sizeof(userID) - 1);
-        userID[sizeof(userID) - 1] = '\0';
-    }
-    
-    void setName(const string& userName) {
-        strncpy(name, userName.c_str(), sizeof(name) - 1);
-        name[sizeof(name) - 1] = '\0';
-    }
-    
-    void setEmail(const string& userEmail) {
-        strncpy(email, userEmail.c_str(), sizeof(email) - 1);
-        email[sizeof(email) - 1] = '\0';
-    }
-    
-    void setPhone(const string& userPhone) {
-        strncpy(phone, userPhone.c_str(), sizeof(phone) - 1);
-        phone[sizeof(phone) - 1] = '\0';
-    }
-    
-    void setIsActive(bool active) { isActive = active; }
-    
-    // Borrow a book (add to user's borrowed list)
-    bool borrowBook(const string& bookID, const string& borrowDate) {
-        // Check borrowing limit
-        if (borrowCount >= 10) {
-            cout << "Cannot borrow more than 10 books at a time!" << endl;
-            return false;
-        }
-        
-        // Check if book is already borrowed by this user
-        if (hasBorrowedBook(bookID)) {
-            cout << "Book already borrowed by this user!" << endl;
-            return false;
-        }
-        
-        // Add book to borrowed list
-        borrowedBooks[borrowCount] = BorrowRecord(bookID, borrowDate);
-        borrowCount++;
-        return true;
-    }
-    
-    // Return a book (mark as returned)
-    bool returnBook(const string& bookID, const string& returnDate) {
-        for (int i = 0; i < borrowCount; i++) {
-            if (string(borrowedBooks[i].bookID) == bookID && !borrowedBooks[i].isReturned) {
-                strncpy(borrowedBooks[i].returnDate, returnDate.c_str(), sizeof(borrowedBooks[i].returnDate) - 1);
-                borrowedBooks[i].returnDate[sizeof(borrowedBooks[i].returnDate) - 1] = '\0';
-                borrowedBooks[i].isReturned = true;
-                return true;
-            }
-        }
-        return false;
-    }
-    
-    // Display all borrowed books for this user
-    void listBorrowedBooks() const {
-        cout << "\n" << string(60, '=') << endl;
-        cout << "Borrowed Books for User: " << name << " (ID: " << userID << ")" << endl;
-        cout << string(60, '=') << endl;
-        
-        bool hasActiveBorrows = false;
-        for (int i = 0; i < borrowCount; i++) {
-            if (!borrowedBooks[i].isReturned) {
-                cout << "Book ID: " << borrowedBooks[i].bookID << endl;
-                cout << "Borrow Date: " << borrowedBooks[i].borrowDate << endl;
-                cout << "Status: Not Returned" << endl;
-                cout << string(30, '-') << endl;
-                hasActiveBorrows = true;
-            }
-        }
-        
-        if (!hasActiveBorrows) {
-            cout << "No active borrowed books." << endl;
-        }
-        cout << string(60, '=') << endl;
-    }
-    
-    // Check if user has borrowed a specific book
-    bool hasBorrowedBook(const string& bookID) const {
-        for (int i = 0; i < borrowCount; i++) {
-            if (string(borrowedBooks[i].bookID) == bookID && !borrowedBooks[i].isReturned) {
-                return true;
-            }
-        }
-        return false;
-    }
-    
-    // Get borrow date for a specific book
-    string getBorrowDate(const string& bookID) const {
-        for (int i = 0; i < borrowCount; i++) {
-            if (string(borrowedBooks[i].bookID) == bookID && !borrowedBooks[i].isReturned) {
-                return string(borrowedBooks[i].borrowDate);
-            }
-        }
-        return "";
-    }
-    
-    // Display user details
+    string userID;
+    string name;
+    string email;
+    string phone;
+    bool isActive;
+
+    User() = default;
+
+    User(string id, string n, string e, string p, bool active = true)
+        : userID(id), name(n), email(e), phone(p), isActive(active) {}
+
     void displayDetails() const {
         cout << "\n" << string(50, '=') << endl;
         cout << "User ID: " << userID << endl;
         cout << "Name: " << name << endl;
         cout << "Email: " << email << endl;
         cout << "Phone: " << phone << endl;
-        cout << "Active Borrowed Books: " << borrowCount << endl;
         cout << "Status: " << (isActive ? "Active" : "Inactive") << endl;
         cout << string(50, '=') << endl;
     }
-    
-    // Operator overloading for comparison
-    bool operator==(const string& id) const {
-        return string(userID) == id;
-    }
 };
 
-// ============================================================================
-//                              LIBRARY CLASS
-// ============================================================================
-
-class Library {
-private:
-    vector<Book> books;                 // Collection of all books
-    vector<User> users;                 // Collection of all users
-    const string BOOKS_FILE = "books.dat";  // Binary file for books
-    const string USERS_FILE = "users.dat";  // Binary file for users
-    
-    // Helper function to calculate days between two dates
-    int calculateDays(const string& date1, const string& date2) const {
-        // Simple date calculation (DD/MM/YYYY format)
-        // Note: This is simplified - real implementation should use proper date library
-        struct tm tm1 = {}, tm2 = {};
-        
-        sscanf(date1.c_str(), "%d/%d/%d", &tm1.tm_mday, &tm1.tm_mon, &tm1.tm_year);
-        sscanf(date2.c_str(), "%d/%d/%d", &tm2.tm_mday, &tm2.tm_mon, &tm2.tm_year);
-        
-        tm1.tm_mon--; tm2.tm_mon--;           // Month is 0-based
-        tm1.tm_year -= 1900; tm2.tm_year -= 1900;  // Year since 1900
-        
-        time_t time1 = mktime(&tm1);
-        time_t time2 = mktime(&tm2);
-        
-        return (int)difftime(time2, time1) / (24 * 3600);
-    }
-    
-    // Validate date format (DD/MM/YYYY)
-    bool isValidDate(const string& date) const {
-        if (date.length() != 10) return false;
-        if (date[2] != '/' || date[5] != '/') return false;
-        
-        int day, month, year;
-        if (sscanf(date.c_str(), "%d/%d/%d", &day, &month, &year) != 3) return false;
-        
-        return (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 1900);
-    }
-    
-    // Get current system date
-    string getCurrentDate() const {
-        time_t now = time(0);
-        tm* ltm = localtime(&now);
-        
-        char buffer[11];
-        sprintf(buffer, "%02d/%02d/%04d", 
-                ltm->tm_mday, ltm->tm_mon + 1, ltm->tm_year + 1900);
-        
-        return string(buffer);
-    }
-    
+class BorrowRecord {
 public:
-    // Constructor - Load data from files
-    Library() {
-        cout << "Initializing Library Management System..." << endl;
-        loadFromFile();
-        cout << "System ready!" << endl;
+    string bookID;
+    string title;
+    string borrowDate;
+
+    BorrowRecord(string bID, string t, string bDate) : bookID(bID), title(t), borrowDate(bDate) {}
+};
+
+
+// ============================================================================
+// DATABASE CLASS (Handles all SQL operations) 🛠️
+// ============================================================================
+class Database {
+private:
+    mysqlx::Session& sess;
+    mysqlx::Schema db;
+    mysqlx::Table books_table;
+    mysqlx::Table users_table;
+    mysqlx::Table borrow_records_table;
+
+public:
+    Database(mysqlx::Session& session) :
+        sess(session),
+        db(sess.getSchema("library_db")),
+        books_table(db.getTable("books")),
+        users_table(db.getTable("users")),
+        borrow_records_table(db.getTable("borrow_records"))
+    {}
+
+    // --- Book Operations ---
+    bool addBook(const Book& newBook) {
+        try {
+            books_table.insert("book_id", "title", "author", "total_copies", "available_copies", "download_link", "download_limit")
+                .values(newBook.bookID, newBook.title, newBook.author, newBook.totalCopies, newBook.availableCopies, newBook.downloadLink, newBook.downloadLimit)
+                .execute();
+            return true;
+        } catch (const mysqlx::Error&) {
+            return false;
+        }
     }
-    
-    // Destructor - Save data to files
-    ~Library() {
-        cout << "Saving data and shutting down..." << endl;
-        saveToFile();
-    }
-    
-    // ========================================================================
-    //                          BOOK MANAGEMENT
-    // ========================================================================
-    
-    // Add a new book to the library
-    bool addBook(const Book& book) {
-        // Check if book ID already exists (prevent duplicates)
-        for (const auto& b : books) {
-            if (b.getBookID() == book.getBookID()) {
-                cout << "Error: Book with ID " << book.getBookID() << " already exists!" << endl;
+
+    bool removeBook(const string& bookID) {
+        try {
+            mysqlx::RowResult result = borrow_records_table.select("COUNT(*)")
+                .where("book_id = :id AND is_returned = false")
+                .bind("id", bookID)
+                .execute();
+            if (result.fetchOne()[0].get<int>() > 0) {
+                cout << "Error: Cannot remove book. Some copies are currently borrowed." << endl;
                 return false;
             }
-        }
-        
-        books.push_back(book);
-        cout << "Book added successfully!" << endl;
-        saveToFile();  // Auto-save after each operation
-        return true;
-    }
-    
-    // Remove a book from the library
-    bool removeBook(const string& bookID) {
-        auto it = find_if(books.begin(), books.end(), 
-                         [&bookID](const Book& b) { return b.getBookID() == bookID; });
-        
-        if (it == books.end()) {
-            cout << "Error: Book with ID " << bookID << " not found!" << endl;
+            return books_table.remove().where("book_id = :id").bind("id", bookID).execute().getAffectedItemsCount() > 0;
+        } catch (const mysqlx::Error& err) {
+            cout << "Database error during book removal: " << err << endl;
             return false;
         }
-        
-        // Check if all copies are available (none borrowed)
-        if (it->getAvailableCopies() != it->getTotalCopies()) {
-            cout << "Error: Cannot remove book. Some copies are currently borrowed!" << endl;
-            return false;
-        }
-        
-        books.erase(it);
-        cout << "Book removed successfully!" << endl;
-        saveToFile();
-        return true;
     }
-    
-    // Search books by title, author, or book ID
-    vector<Book> searchBook(const string& query) const {
+
+    unique_ptr<Book> findBook(const string& bookID) {
+        mysqlx::RowResult result = books_table.select("*").where("book_id = :id").bind("id", bookID).execute();
+        mysqlx::Row row = result.fetchOne();
+        if (row) {
+            return make_unique<Book>(
+                row[0].get<string>(), row[1].get<string>(), row[2].get<string>(),
+                row[3].get<int>(), row[4].get<int>(), row[5].get<bool>(),
+                row[6].isNull() ? "" : row[6].get<string>(),
+                row[7].isNull() ? 0 : row[7].get<int>()
+            );
+        }
+        return nullptr;
+    }
+
+    vector<Book> searchBook(const string& query) {
         vector<Book> results;
-        string lowerQuery = query;
-        transform(lowerQuery.begin(), lowerQuery.end(), lowerQuery.begin(), ::tolower);
-        
-        for (const auto& book : books) {
-            string title = book.getTitle();
-            string author = book.getAuthor();
-            string bookID = book.getBookID();
-            
-            // Convert to lowercase for case-insensitive search
-            transform(title.begin(), title.end(), title.begin(), ::tolower);
-            transform(author.begin(), author.end(), author.begin(), ::tolower);
-            transform(bookID.begin(), bookID.end(), bookID.begin(), ::tolower);
-            
-            // Check if query matches any field
-            if (title.find(lowerQuery) != string::npos || 
-                author.find(lowerQuery) != string::npos || 
-                bookID.find(lowerQuery) != string::npos) {
-                results.push_back(book);
+        string likeQuery = "%" + query + "%";
+        try {
+            mysqlx::RowResult result = books_table.select("*")
+                .where("title LIKE :query OR author LIKE :query OR book_id = :id")
+                .bind("query", likeQuery)
+                .bind("id", query)
+                .execute();
+
+            for (mysqlx::Row row : result.fetchAll()) {
+                results.emplace_back(
+                    row[0].get<string>(), row[1].get<string>(), row[2].get<string>(),
+                    row[3].get<int>(), row[4].get<int>(), row[5].get<bool>(),
+                    row[6].isNull() ? "" : row[6].get<string>(),
+                    row[7].isNull() ? 0 : row[7].get<int>()
+                );
             }
+        } catch (const mysqlx::Error& err) {
+             cout << "Database error during book search: " << err << endl;
         }
-        
         return results;
     }
-    
-    // Find a specific book by ID
-    Book* findBook(const string& bookID) {
-        auto it = find_if(books.begin(), books.end(), 
-                         [&bookID](const Book& b) { return b.getBookID() == bookID; });
-        
-        return (it != books.end()) ? &(*it) : nullptr;
-    }
-    
-    // Display all books in the library
-    void displayAllBooks() const {
-        if (books.empty()) {
-            cout << "No books in the library!" << endl;
-            return;
+
+    vector<Book> getAllBooks() {
+        vector<Book> allBooks;
+        mysqlx::RowResult result = books_table.select("*").execute();
+        for (mysqlx::Row row : result.fetchAll()) {
+             allBooks.emplace_back(
+                    row[0].get<string>(), row[1].get<string>(), row[2].get<string>(),
+                    row[3].get<int>(), row[4].get<int>(), row[5].get<bool>(),
+                    row[6].isNull() ? "" : row[6].get<string>(),
+                    row[7].isNull() ? 0 : row[7].get<int>()
+                );
         }
-        
-        cout << "\n" << string(80, '=') << endl;
-        cout << "ALL BOOKS IN LIBRARY (" << books.size() << " books)" << endl;
-        cout << string(80, '=') << endl;
-        
-        for (const auto& book : books) {
-            book.displayDetails();
+        return allBooks;
+    }
+
+    // --- User Operations ---
+    bool addUser(const User& newUser) {
+        try {
+            users_table.insert("user_id", "name", "email", "phone")
+                .values(newUser.userID, newUser.name, newUser.email, newUser.phone)
+                .execute();
+            return true;
+        } catch (const mysqlx::Error&) {
+            return false;
         }
     }
-    
-    // ========================================================================
-    //                          USER MANAGEMENT
-    // ========================================================================
-    
-    // Register a new user
-    bool registerUser(const User& user) {
-        // Check if user ID already exists (prevent duplicates)
-        for (const auto& u : users) {
-            if (u.getUserID() == user.getUserID()) {
-                cout << "Error: User with ID " << user.getUserID() << " already exists!" << endl;
+
+    bool removeUser(const string& userID) {
+        try {
+            mysqlx::RowResult result = borrow_records_table.select("COUNT(*)")
+                .where("user_id = :id AND is_returned = false")
+                .bind("id", userID)
+                .execute();
+            if (result.fetchOne()[0].get<int>() > 0) {
+                cout << "Error: Cannot remove user. User has unreturned books." << endl;
                 return false;
             }
-        }
-        
-        users.push_back(user);
-        cout << "User registered successfully!" << endl;
-        saveToFile();
-        return true;
-    }
-    
-    // Remove a user from the system
-    bool removeUser(const string& userID) {
-        auto it = find_if(users.begin(), users.end(), 
-                         [&userID](const User& u) { return u.getUserID() == userID; });
-        
-        if (it == users.end()) {
-            cout << "Error: User with ID " << userID << " not found!" << endl;
+            return users_table.remove().where("user_id = :id").bind("id", userID).execute().getAffectedItemsCount() > 0;
+        } catch (const mysqlx::Error& err) {
+            cout << "Database error during user removal: " << err << endl;
             return false;
         }
-        
-        // Check if user has any borrowed books
-        if (it->getBorrowCount() > 0) {
-            cout << "Error: Cannot remove user. User has borrowed books!" << endl;
-            return false;
-        }
-        
-        users.erase(it);
-        cout << "User removed successfully!" << endl;
-        saveToFile();
-        return true;
     }
-    
-    // Find a specific user by ID
-    User* findUser(const string& userID) {
-        auto it = find_if(users.begin(), users.end(), 
-                         [&userID](const User& u) { return u.getUserID() == userID; });
-        
-        return (it != users.end()) ? &(*it) : nullptr;
-    }
-    
-    // Display all registered users
-    void displayAllUsers() const {
-        if (users.empty()) {
-            cout << "No users registered!" << endl;
-            return;
+
+    unique_ptr<User> findUser(const string& userID) {
+        mysqlx::RowResult result = users_table.select("*").where("user_id = :id").bind("id", userID).execute();
+        mysqlx::Row row = result.fetchOne();
+        if (row) {
+            return make_unique<User>(
+                row[0].get<string>(), row[1].get<string>(), row[2].get<string>(), 
+                row[3].get<string>(), row[4].get<bool>()
+            );
         }
-        
-        cout << "\n" << string(80, '=') << endl;
-        cout << "ALL REGISTERED USERS (" << users.size() << " users)" << endl;
-        cout << string(80, '=') << endl;
-        
-        for (const auto& user : users) {
-            user.displayDetails();
-        }
+        return nullptr;
     }
-    
-    // ========================================================================
-    //                          BOOK OPERATIONS
-    // ========================================================================
-    
-    // Issue a book to a user
+
+    vector<User> getAllUsers() {
+        vector<User> allUsers;
+        mysqlx::RowResult result = users_table.select("*").execute();
+        for (mysqlx::Row row : result.fetchAll()) {
+            allUsers.emplace_back(
+                 row[0].get<string>(), row[1].get<string>(), row[2].get<string>(), 
+                 row[3].get<string>(), row[4].get<bool>()
+            );
+        }
+        return allUsers;
+    }
+
+    // --- Borrowing Operations ---
+    bool isBookAlreadyBorrowedByUser(const string& userID, const string& bookID){
+        mysqlx::RowResult result = borrow_records_table.select("COUNT(*)")
+            .where("user_id = :uid AND book_id = :bid AND is_returned = false")
+            .bind("uid", userID).bind("bid", bookID).execute();
+        return result.fetchOne()[0].get<int>() > 0;
+    }
+
     bool issueBook(const string& userID, const string& bookID) {
-        User* user = findUser(userID);
-        Book* book = findBook(bookID);
-        
-        // Validate user exists
-        if (!user) {
-            cout << "Error: User with ID " << userID << " not found!" << endl;
-            return false;
-        }
-        
-        // Validate book exists
-        if (!book) {
-            cout << "Error: Book with ID " << bookID << " not found!" << endl;
-            return false;
-        }
-        
-        // Check if book is available
-        if (!book->isAvailable()) {
-            cout << "Error: Book is not available for borrowing!" << endl;
-            return false;
-        }
-        
-        // Check if user already has this book
-        if (user->hasBorrowedBook(bookID)) {
-            cout << "Error: User has already borrowed this book!" << endl;
-            return false;
-        }
-        
-        string currentDate = getCurrentDate();
-        
-        // Issue the book (update both user and book records)
-        if (user->borrowBook(bookID, currentDate) && book->borrowBook()) {
-            cout << "Book issued successfully!" << endl;
-            cout << "Issue Date: " << currentDate << endl;
-            cout << "Return Date: Please return within 14 days to avoid fine." << endl;
-            saveToFile();
-            return true;
-        }
-        
-        cout << "Error: Failed to issue book!" << endl;
-        return false;
-    }
-    
-    // Return a book from a user
-    bool returnBook(const string& userID, const string& bookID, const string& returnDate = "") {
-        User* user = findUser(userID);
-        Book* book = findBook(bookID);
-        
-        // Validate user exists
-        if (!user) {
-            cout << "Error: User with ID " << userID << " not found!" << endl;
-            return false;
-        }
-        
-        // Validate book exists
-        if (!book) {
-            cout << "Error: Book with ID " << bookID << " not found!" << endl;
-            return false;
-        }
-        
-        // Check if user has borrowed this book
-        if (!user->hasBorrowedBook(bookID)) {
-            cout << "Error: User has not borrowed this book!" << endl;
-            return false;
-        }
-        
-        // Use current date if no return date provided
-        string actualReturnDate = returnDate.empty() ? getCurrentDate() : returnDate;
-        
-        // Validate return date format
-        if (!isValidDate(actualReturnDate)) {
-            cout << "Error: Invalid return date format! Use DD/MM/YYYY" << endl;
-            return false;
-        }
-        
-        string borrowDate = user->getBorrowDate(bookID);
-        double fine = calculateFine(borrowDate, actualReturnDate);
-        
-        // Return the book (update both user and book records)
-        if (user->returnBook(bookID, actualReturnDate) && book->returnBook()) {
-            cout << "Book returned successfully!" << endl;
-            cout << "Return Date: " << actualReturnDate << endl;
+        try {
+            sess.startTransaction();
+            mysqlx::RowResult bookResult = books_table.select("available_copies")
+                .where("book_id = :id AND available_copies > 0")
+                .bind("id", bookID)
+                .execute();
+            if (!bookResult.fetchOne()) {
+                cout << "Error: Book is not available for borrowing." << endl;
+                sess.rollback();
+                return false;
+            }
+
+            books_table.update().set("available_copies", mysqlx::expr("available_copies - 1")).where("book_id = :id").bind("id", bookID).execute();
             
-            if (fine > 0) {
-                cout << "Fine Amount: Rs. " << fixed << setprecision(2) << fine << endl;
-            } else {
-                cout << "No fine applicable." << endl;
-            }
+            string today = getCurrentDateForSQL();
+            borrow_records_table.insert("user_id", "book_id", "borrow_date").values(userID, bookID, today).execute();
             
-            saveToFile();
+            sess.commit();
             return true;
-        }
-        
-        cout << "Error: Failed to return book!" << endl;
-        return false;
-    }
-    
-    // Calculate fine for overdue books
-    double calculateFine(const string& issueDate, const string& returnDate) const {
-        int days = calculateDays(issueDate, returnDate);
-        int overdueDays = days - 14;  // 14-day free period
-        
-        return (overdueDays > 0) ? overdueDays * 2.0 : 0.0;  // Rs. 2 per day
-    }
-    
-    // ========================================================================
-    //                          FILE OPERATIONS
-    // ========================================================================
-    
-    // Load data from binary files
-    bool loadFromFile() {
-        // Load books from books.dat
-        ifstream bookFile(BOOKS_FILE, ios::binary);
-        if (bookFile.is_open()) {
-            Book book;
-            while (bookFile.read(reinterpret_cast<char*>(&book), sizeof(Book))) {
-                books.push_back(book);
-            }
-            bookFile.close();
-            cout << "Loaded " << books.size() << " books from " << BOOKS_FILE << endl;
-        } else {
-            cout << "No existing book data found. Starting fresh." << endl;
-        }
-        
-        // Load users from users.dat
-        ifstream userFile(USERS_FILE, ios::binary);
-        if (userFile.is_open()) {
-            User user;
-            while (userFile.read(reinterpret_cast<char*>(&user), sizeof(User))) {
-                users.push_back(user);
-            }
-            userFile.close();
-            cout << "Loaded " << users.size() << " users from " << USERS_FILE << endl;
-        } else {
-            cout << "No existing user data found. Starting fresh." << endl;
-        }
-        
-        return true;
-    }
-    
-    // Save data to binary files
-    bool saveToFile() {
-        // Save books to books.dat
-        ofstream bookFile(BOOKS_FILE, ios::binary);
-        if (bookFile.is_open()) {
-            for (const auto& book : books) {
-                bookFile.write(reinterpret_cast<const char*>(&book), sizeof(Book));
-            }
-            bookFile.close();
-        } else {
-            cout << "Error: Could not save books to file!" << endl;
+
+        } catch (const mysqlx::Error& err) {
+            cout << "Database error during book issue: " << err << endl;
+            sess.rollback();
             return false;
         }
-        
-        // Save users to users.dat
-        ofstream userFile(USERS_FILE, ios::binary);
-        if (userFile.is_open()) {
-            for (const auto& user : users) {
-                userFile.write(reinterpret_cast<const char*>(&user), sizeof(User));
+    }
+    
+    // Returns pair: {success_status, borrow_date_string}
+    std::pair<bool, string> returnBook(const string& userID, const string& bookID, const string& returnDate) {
+        try {
+             sess.startTransaction();
+             mysqlx::RowResult borrowResult = borrow_records_table.select("borrow_date", "record_id")
+                .where("user_id = :uid AND book_id = :bid AND is_returned = false")
+                .bind("uid", userID).bind("bid", bookID).execute();
+            
+            mysqlx::Row row = borrowResult.fetchOne();
+            if (!row) {
+                cout << "Error: This book is not actively borrowed by this user." << endl;
+                sess.rollback();
+                return {false, ""};
             }
-            userFile.close();
-        } else {
-            cout << "Error: Could not save users to file!" << endl;
-            return false;
+            string borrowDate = row[0].get<string>();
+            int recordId = row[1].get<int>();
+
+            borrow_records_table.update().set("is_returned", true).set("return_date", returnDate)
+                .where("record_id = :rid").bind("rid", recordId).execute();
+
+            books_table.update().set("available_copies", mysqlx::expr("available_copies + 1"))
+                .where("book_id = :bid").bind("bid", bookID).execute();
+            
+            sess.commit();
+            return {true, borrowDate};
+
+        } catch (const mysqlx::Error& err) {
+            cout << "Database error during book return: " << err << endl;
+            sess.rollback();
+            return {false, ""};
+        }
+    }
+vector<BorrowRecord> getBorrowedBooksForUser(const string& userID) {
+    vector<BorrowRecord> records;
+    try {
+        // CORRECTION: Use CAST(.. AS CHAR) to force the database to format the date.
+        // This ensures C++ always receives a readable string.
+        mysqlx::SqlResult result = sess.sql(
+            "SELECT br.book_id, b.title, CAST(br.borrow_date AS CHAR) "
+            "FROM borrow_records AS br "
+            "JOIN books AS b ON br.book_id = b.book_id "
+            "WHERE br.user_id = ? AND br.is_returned = false"
+        ).bind(userID).execute();
+
+        for (mysqlx::Row row : result.fetchAll()) {
+            // Now we can safely get the date as a string because the DB already converted it.
+            records.emplace_back(
+                row[0].get<string>(), // book_id
+                row[1].get<string>(), // title
+                row[2].get<string>()  // borrow_date (now a proper string)
+            );
+        }
+    } catch (const mysqlx::Error& err) {
+        cout << "Database error while fetching borrowed books: " << err << endl;
+    }
+    return records;
+}
+
+void getStatistics(int& totalTitles, int& availableCopies, int& borrowedCopies, int& totalUsers) {
+    try {
+        // FINAL CORRECTION: Use CAST(... AS SIGNED) to force the database to return
+        // a standard integer type. This resolves the final conversion error.
+        
+        // Initialize all values to a default of 0.
+        totalTitles = 0;
+        availableCopies = 0;
+        borrowedCopies = 0;
+        totalUsers = 0;
+
+        mysqlx::Row row;
+
+        // Get total book titles (COUNT is always an integer)
+        row = sess.sql("SELECT COUNT(*) FROM books").execute().fetchOne();
+        if (row) totalTitles = row[0].get<int>();
+
+        // Get available copies, casting the result to a signed integer
+        row = sess.sql("SELECT CAST(COALESCE(SUM(available_copies), 0) AS SIGNED) FROM books").execute().fetchOne();
+        if (row) availableCopies = row[0].get<int64_t>();
+
+        // Get total copies to calculate borrowed count, casting the result
+        row = sess.sql("SELECT CAST(COALESCE(SUM(total_copies), 0) AS SIGNED) FROM books").execute().fetchOne();
+        if (row) {
+            int64_t totalCopies = row[0].get<int64_t>();
+            borrowedCopies = totalCopies - availableCopies;
         }
         
-        return true;
+        // Get total registered users (COUNT is always an integer)
+        row = sess.sql("SELECT COUNT(*) FROM users").execute().fetchOne();
+        if (row) totalUsers = row[0].get<int>();
+
+    } catch (const mysqlx::Error& err) {
+         cout << "Database error while fetching statistics: " << err.what() << endl;
     }
-    
-    // ========================================================================
-    //                          STATISTICS & REPORTS
-    // ========================================================================
-    
-    // Display library statistics
-    void displayStatistics() const {
-        int totalBooks = books.size();
-        int availableBooks = 0;
-        int borrowedBooks = 0;
-        
-        for (const auto& book : books) {
-            availableBooks += book.getAvailableCopies();
-            borrowedBooks += (book.getTotalCopies() - book.getAvailableCopies());
-        }
-        
-        cout << "\n" << string(60, '=') << endl;
-        cout << "LIBRARY STATISTICS" << endl;
-        cout << string(60, '=') << endl;
-        cout << "Total Book Titles: " << totalBooks << endl;
-        cout << "Total Available Copies: " << availableBooks << endl;
-        cout << "Total Borrowed Copies: " << borrowedBooks << endl;
-        cout << "Total Registered Users: " << users.size() << endl;
-        cout << string(60, '=') << endl;
-    }
+}
 };
 
 // ============================================================================
-//                          MAIN PROGRAM & MENU SYSTEM
+// LIBRARY CLASS (Manages the application logic using the Database)
 // ============================================================================
-
-class LibrarySystem {
+class Library {
 private:
-    Library library;  // Main library object (Composition)
-    
-    // Clear screen function (cross-platform)
-    void clearScreen() {
-        #ifdef _WIN32
-            system("cls");
-        #else
-            system("clear");
-        #endif
-    }
-    
-    // Pause screen and wait for user input
-    void pauseScreen() {
-        cout << "\nPress Enter to continue...";
-        cin.ignore();
-        cin.get();
-    }
-    
-    // Display main menu
-    void displayMainMenu() {
-        cout << "\n" << string(60, '=') << endl;
-        cout << "           LIBRARY MANAGEMENT SYSTEM" << endl;
-        cout << string(60, '=') << endl;
-        cout << "1.  Add New Book" << endl;
-        cout << "2.  Remove Book" << endl;
-        cout << "3.  Search Books" << endl;
-        cout << "4.  Display All Books" << endl;
-        cout << "5.  Register New User" << endl;
-        cout << "6.  Remove User" << endl;
-        cout << "7.  Display All Users" << endl;
-        cout << "8.  Issue Book" << endl;
-        cout << "9.  Return Book" << endl;
-        cout << "10. View User's Borrowed Books" << endl;
-        cout << "11. Library Statistics" << endl;
-        cout << "0.  Exit" << endl;
-        cout << string(60, '=') << endl;
-        cout << "Enter your choice: ";
-    }
-    
-    // Add new book menu
+    Database db;
+
+public:
+    Library(mysqlx::Session& session) : db(session) {}
+
     void addBookMenu() {
-        string bookID, title, author;
-        int copies;
+        string id, title, author, link, isDigital;
+        int copies, limit = 0;
         
-        cout << "\n" << string(40, '=') << endl;
-        cout << "ADD NEW BOOK" << endl;
-        cout << string(40, '=') << endl;
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "\nEnter Book ID: ";      getline(cin, id);
+        cout << "Enter Title: ";        getline(cin, title);
+        cout << "Enter Author: ";       getline(cin, author);
+        cout << "Enter Number of Copies: "; cin >> copies;
         
-        cin.ignore();
-        cout << "Enter Book ID: ";
-        getline(cin, bookID);
-        
-        cout << "Enter Title: ";
-        getline(cin, title);
-        
-        cout << "Enter Author: ";
-        getline(cin, author);
-        
-        cout << "Enter Number of Copies: ";
-        cin >> copies;
-        
-        if (copies <= 0) {
-            cout << "Error: Number of copies must be positive!" << endl;
-            return;
+        cout << "Is this a digital book? (y/n): "; cin >> isDigital;
+        if (isDigital == "y" || isDigital == "Y") {
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            cout << "Enter Download Link: "; getline(cin, link);
+            cout << "Enter Download Limit: "; cin >> limit;
         }
-        
-        Book newBook(bookID, title, author, copies);
-        library.addBook(newBook);
+
+        Book newBook(id, title, author, copies, copies, true, link, limit);
+        if (db.addBook(newBook)) {
+            cout << "Book added successfully!" << endl;
+        } else {
+            cout << "Error: Could not add book. ID might already exist." << endl;
+        }
     }
-    
-    // Remove book menu
+
     void removeBookMenu() {
         string bookID;
-        
-        cout << "\n" << string(40, '=') << endl;
-        cout << "REMOVE BOOK" << endl;
-        cout << string(40, '=') << endl;
-        
-        cin.ignore();
-        cout << "Enter Book ID to remove: ";
+        cout << "\nEnter Book ID to remove: ";
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
         getline(cin, bookID);
-        
-        library.removeBook(bookID);
+
+        if (db.removeBook(bookID)) {
+            cout << "Book removed successfully!" << endl;
+        } else {
+            cout << "Error: Could not remove book. Check if it exists or is borrowed." << endl;
+        }
     }
     
-    // Search books menu
     void searchBookMenu() {
         string query;
-        
-        cout << "\n" << string(40, '=') << endl;
-        cout << "SEARCH BOOKS" << endl;
-        cout << string(40, '=') << endl;
-        
-        cin.ignore();
-        cout << "Enter search query (Title/Author/Book ID): ";
+        cout << "\nEnter search query (Title/Author/Book ID): ";
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
         getline(cin, query);
         
-        vector<Book> results = library.searchBook(query);
-        
+        vector<Book> results = db.searchBook(query);
         if (results.empty()) {
-            cout << "No books found matching your search!" << endl;
+            cout << "No books found matching your query." << endl;
         } else {
             cout << "\nSearch Results (" << results.size() << " found):" << endl;
             for (const auto& book : results) {
@@ -932,204 +487,256 @@ private:
             }
         }
     }
-    
-    // Register new user menu
+
+    void displayAllBooks() {
+        vector<Book> allBooks = db.getAllBooks();
+        if (allBooks.empty()) {
+            cout << "No books in the library." << endl;
+            return;
+        }
+        cout << "\nALL BOOKS IN LIBRARY (" << allBooks.size() << " titles)" << endl;
+        for (const auto& book : allBooks) {
+            book.displayDetails();
+        }
+    }
+
     void registerUserMenu() {
-        string userID, name, email, phone;
-        
-        cout << "\n" << string(40, '=') << endl;
-        cout << "REGISTER NEW USER" << endl;
-        cout << string(40, '=') << endl;
-        
-        cin.ignore();
-        cout << "Enter User ID: ";
-        getline(cin, userID);
-        
-        cout << "Enter Name: ";
-        getline(cin, name);
-        
-        cout << "Enter Email: ";
-        getline(cin, email);
-        
-        cout << "Enter Phone: ";
-        getline(cin, phone);
-        
-        User newUser(userID, name, email, phone);
-        library.registerUser(newUser);
+        string id, name, email, phone;
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "\nEnter User ID: ";    getline(cin, id);
+        cout << "Enter Name: ";       getline(cin, name);
+        cout << "Enter Email: ";      getline(cin, email);
+        cout << "Enter Phone: ";      getline(cin, phone);
+
+        User newUser(id, name, email, phone);
+        if (db.addUser(newUser)) {
+            cout << "User registered successfully!" << endl;
+        } else {
+            cout << "Error: Could not register user. ID or Email might already exist." << endl;
+        }
     }
     
-    // Remove user menu
     void removeUserMenu() {
         string userID;
-        
-        cout << "\n" << string(40, '=') << endl;
-        cout << "REMOVE USER" << endl;
-        cout << string(40, '=') << endl;
-        
-        cin.ignore();
-        cout << "Enter User ID to remove: ";
+        cout << "\nEnter User ID to remove: ";
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
         getline(cin, userID);
-        
-        library.removeUser(userID);
+        if (db.removeUser(userID)) {
+            cout << "User removed successfully!" << endl;
+        } else {
+            cout << "Error: Could not remove user. Check if ID is correct or user has books." << endl;
+        }
     }
-    
-    // Issue book menu
+
+    void displayAllUsers() {
+        vector<User> allUsers = db.getAllUsers();
+        if (allUsers.empty()) {
+            cout << "No users registered." << endl;
+            return;
+        }
+        cout << "\nALL REGISTERED USERS (" << allUsers.size() << " users)" << endl;
+        for (const auto& user : allUsers) {
+            user.displayDetails();
+        }
+    }
+
     void issueBookMenu() {
         string userID, bookID;
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "\nEnter User ID: ";    getline(cin, userID);
+        cout << "Enter Book ID: ";    getline(cin, bookID);
         
-        cout << "\n" << string(40, '=') << endl;
-        cout << "ISSUE BOOK" << endl;
-        cout << string(40, '=') << endl;
+        if (!db.findUser(userID)) { cout << "Error: User not found." << endl; return; }
+        if (!db.findBook(bookID)) { cout << "Error: Book not found." << endl; return; }
+        if (db.isBookAlreadyBorrowedByUser(userID, bookID)) {
+             cout << "Error: User has already borrowed this book." << endl;
+             return;
+        }
         
-        cin.ignore();
-        cout << "Enter User ID: ";
-        getline(cin, userID);
-        
-        cout << "Enter Book ID: ";
-        getline(cin, bookID);
-        
-        library.issueBook(userID, bookID);
-    }
-    
-    // Return book menu
-    void returnBookMenu() {
-        string userID, bookID, returnDate;
-        char useCurrentDate;
-        
-        cout << "\n" << string(40, '=') << endl;
-        cout << "RETURN BOOK" << endl;
-        cout << string(40, '=') << endl;
-        
-        cin.ignore();
-        cout << "Enter User ID: ";
-        getline(cin, userID);
-        
-        cout << "Enter Book ID: ";
-        getline(cin, bookID);
-        
-        cout << "Use current date as return date? (y/n): ";
-        cin >> useCurrentDate;
-        
-        if (useCurrentDate == 'n' || useCurrentDate == 'N') {
-            cin.ignore();
-            cout << "Enter Return Date (DD/MM/YYYY): ";
-            getline(cin, returnDate);
-            library.returnBook(userID, bookID, returnDate);
+        if (db.issueBook(userID, bookID)) {
+            cout << "Book issued successfully on " << getCurrentDateForSQL() << "!" << endl;
+            cout << "Please return within 14 days to avoid a fine." << endl;
         } else {
-            library.returnBook(userID, bookID);
+            cout << "Failed to issue book." << endl;
         }
     }
     
-    // View borrowed books menu
+    void returnBookMenu() {
+        string userID, bookID;
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "\nEnter User ID: ";    getline(cin, userID);
+        cout << "Enter Book ID: ";    getline(cin, bookID);
+
+        string returnDate = getCurrentDateForSQL();
+        auto result = db.returnBook(userID, bookID, returnDate);
+
+        if (result.first) { // if return was successful
+            cout << "Book returned successfully on " << returnDate << "!" << endl;
+            string borrowDate = result.second;
+            int days = calculateDays(borrowDate, returnDate);
+            if (days > 14) {
+                double fine = (days - 14) * 2.0;
+                cout << "Fine Applicable: Rs. " << std::fixed << std::setprecision(2) << fine << endl;
+            } else {
+                cout << "No fine applicable." << endl;
+            }
+        } else {
+            cout << "Failed to return book. Please check the details." << endl;
+        }
+    }
+    
     void viewBorrowedBooksMenu() {
         string userID;
-        
-        cout << "\n" << string(40, '=') << endl;
-        cout << "VIEW BORROWED BOOKS" << endl;
-        cout << string(40, '=') << endl;
-        
-        cin.ignore();
-        cout << "Enter User ID: ";
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "\nEnter User ID to view borrowed books: ";
         getline(cin, userID);
         
-        User* user = library.findUser(userID);
-        if (user) {
-            user->listBorrowedBooks();
-        } else {
+        auto user = db.findUser(userID);
+        if (!user) {
             cout << "User not found!" << endl;
+            return;
         }
+
+        vector<BorrowRecord> records = db.getBorrowedBooksForUser(userID);
+        cout << "\n" << string(60, '=') << endl;
+        cout << "Borrowed Books for User: " << user->name << " (ID: " << user->userID << ")" << endl;
+        cout << string(60, '=') << endl;
+        
+        if (records.empty()) {
+            cout << "No active borrowed books." << endl;
+        } else {
+            for (const auto& record : records) {
+                cout << "Book ID:     " << record.bookID << endl;
+                cout << "Book Title:  " << record.title << endl;
+                cout << "Borrow Date: " << record.borrowDate << " (YYYY-MM-DD)" << endl;
+                cout << "Status:      Not Returned" << endl;
+                cout << string(30, '-') << endl;
+            }
+        }
+        cout << string(60, '=') << endl;
     }
     
+    void displayStatistics() {
+        int totalTitles = 0, availableCopies = 0, borrowedCopies = 0, totalUsers = 0;
+        db.getStatistics(totalTitles, availableCopies, borrowedCopies, totalUsers);
+
+        cout << "\n" << string(60, '=') << endl;
+        cout << "LIBRARY STATISTICS" << endl;
+        cout << string(60, '=') << endl;
+        cout << "Total Book Titles: " << totalTitles << endl;
+        cout << "Total Available Copies: " << availableCopies << endl;
+        cout << "Total Borrowed Copies: " << borrowedCopies << endl;
+        cout << "Total Registered Users: " << totalUsers << endl;
+        cout << string(60, '=') << endl;
+    }
+};
+
+
+// ============================================================================
+// MENU SYSTEM CLASS (Handles user interaction)
+// ============================================================================
+class LibrarySystem {
+private:
+    Library library;
+
 public:
-    // Main program loop
+    LibrarySystem(mysqlx::Session& session) : library(session) {}
+
+    void clearScreen() {
+        #ifdef _WIN32
+            system("cls");
+        #else
+            system("clear");
+        #endif
+    }
+
+    void pauseScreen() {
+        cout << "\nPress Enter to continue...";
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cin.get();
+    }
+
+    void displayMainMenu() {
+        clearScreen();
+        cout << "\n" << string(60, '=') << endl;
+        cout << "         LIBRARY MANAGEMENT SYSTEM (DATABASE)" << endl;
+        cout << string(60, '=') << endl;
+        cout << " 1. Add New Book" << endl;
+        cout << " 2. Remove Book" << endl;
+        cout << " 3. Search Books" << endl;
+        cout << " 4. Display All Books" << endl;
+        cout << " 5. Register New User" << endl;
+        cout << " 6. Remove User" << endl;
+        cout << " 7. Display All Users" << endl;
+        cout << " 8. Issue Book" << endl;
+        cout << " 9. Return Book" << endl;
+        cout << "10. View User's Borrowed Books" << endl;
+        cout << "11. Library Statistics" << endl;
+        cout << " 0. Exit" << endl;
+        cout << string(60, '=') << endl;
+        cout << "Enter your choice: ";
+    }
+
     void run() {
         int choice;
-        
-        cout << "Welcome to Library Management System!" << endl;
-        cout << "Files will be created automatically: books.dat, users.dat" << endl;
-        
         while (true) {
-            clearScreen();
             displayMainMenu();
-            
-            // Input validation
-            if (!(cin >> choice)) {
+            cin >> choice;
+            if (!cin) {
                 cin.clear();
                 cin.ignore(numeric_limits<streamsize>::max(), '\n');
                 cout << "Invalid input! Please enter a number." << endl;
                 pauseScreen();
                 continue;
             }
-            
-            // Menu selection
+
             switch (choice) {
-                case 1:
-                    addBookMenu();
-                    break;
-                case 2:
-                    removeBookMenu();
-                    break;
-                case 3:
-                    searchBookMenu();
-                    break;
-                case 4:
-                    library.displayAllBooks();
-                    break;
-                case 5:
-                    registerUserMenu();
-                    break;
-                case 6:
-                    removeUserMenu();
-                    break;
-                case 7:
-                    library.displayAllUsers();
-                    break;
-                case 8:
-                    issueBookMenu();
-                    break;
-                case 9:
-                    returnBookMenu();
-                    break;
-                case 10:
-                    viewBorrowedBooksMenu();
-                    break;
-                case 11:
-                    library.displayStatistics();
-                    break;
+                case 1: library.addBookMenu(); break;
+                case 2: library.removeBookMenu(); break;
+                case 3: library.searchBookMenu(); break;
+                case 4: library.displayAllBooks(); break;
+                case 5: library.registerUserMenu(); break;
+                case 6: library.removeUserMenu(); break;
+                case 7: library.displayAllUsers(); break;
+                case 8: library.issueBookMenu(); break;
+                case 9: library.returnBookMenu(); break;
+                case 10: library.viewBorrowedBooksMenu(); break;
+                case 11: library.displayStatistics(); break;
                 case 0:
-                    cout << "\nThank you for using Library Management System!" << endl;
-                    cout << "All data has been saved to books.dat and users.dat" << endl;
+                    cout << "\nThank you for using the system!" << endl;
                     return;
                 default:
                     cout << "Invalid choice! Please try again." << endl;
             }
-            
             pauseScreen();
         }
     }
 };
 
 // ============================================================================
-//                              MAIN FUNCTION
+// MAIN FUNCTION (Entry point of the program)
 // ============================================================================
-
 int main() {
+    cout << "Attempting to connect to the database..." << endl;
     try {
-        cout << "================================================================================\n";
-        cout << "                    LIBRARY MANAGEMENT SYSTEM\n";
-        cout << "================================================================================\n";
-        cout << "Features: Book Management, User Management, Issue/Return, Fine Calculation\n";
-        cout << "Data Storage: Binary files (books.dat, users.dat) - Created automatically\n";
-        cout << "OOP Concepts: Encapsulation, Inheritance, Polymorphism, Abstraction\n";
-        cout << "================================================================================\n\n";
-        
-        LibrarySystem system;
+        // ❗❗❗ IMPORTANT: Replace "your_password" with your actual MySQL password ❗❗❗
+        mysqlx::Session sess("mysqlx://root:38113114@localhost/library_db");
+        cout << "✅ Connection to the database is established." << endl;
+
+        LibrarySystem system(sess);
         system.run();
-        
-    } catch (const exception& e) {
-        cout << "An error occurred: " << e.what() << endl;
+
+    } catch (const mysqlx::Error& err) {
+        cout << "❌ Database Error: " << err << endl;
+        cout << "Please ensure the database server is running, the 'library_db' schema exists, and credentials are correct." << endl;
+        cout << "Press Enter to exit.";
+        cin.get();
+        return 1;
+    } catch (const std::exception& ex) {
+        cout << "❌ A standard error occurred: " << ex.what() << endl;
+        cout << "Press Enter to exit.";
+        cin.get();
         return 1;
     }
-    
     return 0;
 }
